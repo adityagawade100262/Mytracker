@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Pro Rupee Tracker</title>
+    <style>
+        :root { 
+            --bg: #f0f2f5; --card-bg: rgba(255, 255, 255, 0.7); 
+            --text: #2c3e50; --primary: #3498db; --income: #27ae60; --expense: #e67e22; 
+        }
+        /* Dark Mode Support */
+        @media (prefers-color-scheme: dark) {
+            :root { 
+                --bg: #121212; --card-bg: rgba(30, 30, 30, 0.7); 
+                --text: #ffffff; --primary: #3498db; 
+            }
+        }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 10px; transition: 0.3s; }
+        
+        /* Glassmorphism Effect */
+        .glass { 
+            background: var(--card-bg); backdrop-filter: blur(10px); 
+            border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 20px; 
+            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+        }
+
+        .container { width: 100%; max-width: 450px; margin: auto; padding-bottom: 20px; }
+        
+        .dashboard { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 20px 0; }
+        .card { padding: 20px; text-align: center; color: white; border-radius: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        .inc-bg { background: linear-gradient(135deg, #2ecc71, #27ae60); }
+        .exp-bg { background: linear-gradient(135deg, #ff9f43, #e67e22); }
+        .value { font-size: 1.4rem; font-weight: bold; }
+
+        .form-section { padding: 20px; border-radius: 20px; margin-bottom: 20px; }
+        input, .type-btn, .save-btn { width: 100%; padding: 14px; margin: 8px 0; border-radius: 12px; border: 1px solid #ddd; font-size: 16px; box-sizing: border-box; background: var(--bg); color: var(--text); }
+        
+        .type-selector { display: flex; gap: 10px; }
+        .type-btn { flex: 1; cursor: pointer; font-weight: bold; transition: 0.2s; border: 2px solid transparent; }
+        .active-credit { border-color: var(--income) !important; color: var(--income); background: rgba(39, 174, 96, 0.1) !important; }
+        .active-debit { border-color: var(--expense) !important; color: var(--expense); background: rgba(230, 126, 34, 0.1) !important; }
+
+        .save-btn { background: var(--primary) !important; color: white !important; border: none !important; margin-top: 10px; cursor: pointer; }
+        .editing-mode { background: #9b59b6 !important; }
+
+        .month-scroll { overflow-x: auto; white-space: nowrap; margin-bottom: 15px; padding-bottom: 5px; -webkit-overflow-scrolling: touch; }
+        .month-chip { display: inline-block; padding: 10px 18px; background: var(--card-bg); border-radius: 15px; margin-right: 8px; cursor: pointer; font-size: 0.85rem; }
+        .month-chip.active { background: var(--primary); color: white; }
+
+        .item { display: flex; justify-content: space-between; align-items: center; padding: 15px; margin-bottom: 10px; border-radius: 15px; }
+        .icon-box { width: 40px; height: 40px; border-radius: 12px; display: flex; justify-content: center; align-items: center; margin-right: 12px; background: rgba(0,0,0,0.05); font-size: 1.2rem; }
+        .day-group { margin: 20px 0 10px; font-weight: bold; opacity: 0.6; font-size: 0.8rem; text-transform: uppercase; }
+        .action-btns button { border: none; background: none; font-size: 1.2rem; cursor: pointer; margin-left: 10px; color: var(--text); }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2 id="currentViewTitle" style="text-align:center;">Daily Tracker</h2>
+    
+    <div class="dashboard">
+        <div class="card inc-bg">
+            <div style="font-size:0.7rem;">INCOME</div>
+            <div id="totalIncome" class="value">₹0</div>
+        </div>
+        <div class="card exp-bg">
+            <div style="font-size:0.7rem;">SPENT</div>
+            <div id="totalExpense" class="value">₹0</div>
+        </div>
+    </div>
+
+    <div class="form-section glass">
+        <h3 id="formTitle" style="margin: 0 0 10px 0; font-size: 1rem;">Record Entry</h3>
+        <input type="date" id="dateInput">
+        <input type="text" id="desc" placeholder="Details (e.g. Lunch, Petrol, Tea)">
+        <input type="number" id="amount" placeholder="Amount (₹)" inputmode="decimal">
+        <div class="type-selector">
+            <button class="type-btn" id="debitBtn" onclick="setType('debit')">Debit (-)</button>
+            <button class="type-btn" id="creditBtn" onclick="setType('credit')">Credit (+)</button>
+        </div>
+        <button class="save-btn" id="submitBtn" onclick="addEntry()">Save Transaction</button>
+    </div>
+
+    <div class="month-scroll" id="monthPicker"></div>
+    <input type="text" id="searchInput" class="glass" style="width:100%; padding:15px; border:none; margin-bottom:15px; box-sizing: border-box;" placeholder="🔍 Search entries...">
+
+    <div id="history"></div>
+</div>
+
+<script>
+    let selectedType = 'debit';
+    let transactions = JSON.parse(localStorage.getItem('rupee_tracker_pro_v2')) || [];
+    let viewingMonth = new Date().getMonth();
+    let viewingYear = new Date().getFullYear();
+    let editIndex = null;
+
+    // Automatic Icon Mapping
+    const icons = { 
+        tea: '☕', coffee: '☕', food: '🍔', lunch: '🍱', petrol: '⛽', fuel: '⛽', 
+        rent: '🏠', salary: '💰', gift: '🎁', shop: '🛍️', bill: '📑', milk: '🥛', car: '🚗', bike: '🏍️'
+    };
+
+    function getIcon(desc) {
+        const words = desc.toLowerCase().split(' ');
+        for(let w of words) if(icons[w]) return icons[w];
+        return '💸';
+    }
+
+    const setTodayDate = () => document.getElementById('dateInput').valueAsDate = new Date();
+
+    function setType(type) {
+        selectedType = type;
+        document.getElementById('debitBtn').className = 'type-btn' + (type === 'debit' ? ' active-debit' : '');
+        document.getElementById('creditBtn').className = 'type-btn' + (type === 'credit' ? ' active-credit' : '');
+    }
+
+    function updateUI() {
+        const historyEl = document.getElementById('history');
+        const monthPicker = document.getElementById('monthPicker');
+        const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+        const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+        
+        document.getElementById('currentViewTitle').innerText = `${monthNames[viewingMonth]} ${viewingYear}`;
+
+        const monthsInList = [...new Set(transactions.map(t => {
+            const d = new Date(t.date);
+            return `${d.getMonth()}-${d.getFullYear()}`;
+        }))].sort((a,b) => b.localeCompare(a));
+
+        const curM = new Date().getMonth(), curY = new Date().getFullYear();
+        monthPicker.innerHTML = `<span class="month-chip ${viewingMonth==curM && viewingYear==curY ? 'active' : ''}" onclick="changeMonth(${curM}, ${curY}, true)">Today</span>`;
+        
+        monthsInList.forEach(m => {
+            const [mIdx, yIdx] = m.split('-').map(Number);
+            if(mIdx == curM && yIdx == curY) return;
+            monthPicker.innerHTML += `<span class="month-chip ${viewingMonth==mIdx && viewingYear==yIdx ? 'active' : ''}" onclick="changeMonth(${mIdx}, ${yIdx}, false)">${monthNames[mIdx].substring(0,3)} ${yIdx}</span>`;
+        });
+
+        historyEl.innerHTML = '';
+        let inc = 0, exp = 0, lastDate = "";
+        
+        const filtered = transactions.map((t, idx) => ({...t, originalIndex: idx}))
+            .filter(t => {
+                const d = new Date(t.date);
+                return d.getMonth() == viewingMonth && d.getFullYear() == viewingYear && t.desc.toLowerCase().includes(searchTerm);
+            }).sort((a,b) => new Date(b.date) - new Date(a.date));
+
+        filtered.forEach(t => {
+            const amt = parseFloat(t.amount);
+            if (t.type === 'credit') inc += amt; else exp += amt;
+            if (t.date !== lastDate) {
+                historyEl.innerHTML += `<div class="day-group">${new Date(t.date).toDateString()}</div>`;
+                lastDate = t.date;
+            }
+            historyEl.innerHTML += `
+                <div class="item glass">
+                    <div style="display:flex; align-items:center;">
+                        <div class="icon-box">${getIcon(t.desc)}</div>
+                        <div style="font-weight:bold;">${t.desc}</div>
+                    </div>
+                    <div class="action-btns">
+                        <span style="color:${t.type==='credit'?'var(--income)':'var(--expense)'};font-weight:bold;">₹${amt.toLocaleString('en-IN')}</span>
+                        <button onclick="startEdit(${t.originalIndex})">✏️</button>
+                        <button onclick="removeEntry(${t.originalIndex})" style="opacity:0.3;">✕</button>
+                    </div>
+                </div>`;
+        });
+
+        document.getElementById('totalIncome').innerText = `₹${inc.toLocaleString('en-IN')}`;
+        document.getElementById('totalExpense').innerText = `₹${exp.toLocaleString('en-IN')}`;
+        localStorage.setItem('rupee_tracker_pro_v2', JSON.stringify(transactions));
+    }
+
+    function addEntry() {
+        const date = document.getElementById('dateInput').value;
+        const desc = document.getElementById('desc').value;
+        const amount = document.getElementById('amount').value;
+        if (!desc || !amount || !date) return;
+
+        if (editIndex !== null) {
+            transactions[editIndex] = { date, desc, amount, type: selectedType };
+            editIndex = null;
+            document.getElementById('submitBtn').innerText = "Save Transaction";
+            document.getElementById('submitBtn').classList.remove('editing-mode');
+            document.getElementById('formTitle').innerText = "Record Entry";
+        } else {
+            transactions.push({ date, desc, amount, type: selectedType });
+        }
+        
+        updateUI();
+        document.getElementById('desc').value = '';
+        document.getElementById('amount').value = '';
+    }
+
+    function startEdit(index) {
+        editIndex = index;
+        const t = transactions[index];
+        document.getElementById('formTitle').innerText = "Edit Entry";
+        document.getElementById('dateInput').value = t.date;
+        document.getElementById('desc').value = t.desc;
+        document.getElementById('amount').value = t.amount;
+        setType(t.type);
+        document.getElementById('submitBtn').innerText = "Update Entry";
+        document.getElementById('submitBtn').classList.add('editing-mode');
+        window.scrollTo(0,0);
+    }
+
+    function removeEntry(index) { if(confirm("Delete?")) { transactions.splice(index, 1); updateUI(); } }
+    
+    function changeMonth(m, y, isToday) { 
+        viewingMonth = m; viewingYear = y; 
+        if(isToday) setTodayDate();
+        updateUI(); 
+    }
+
+    document.getElementById('searchInput').addEventListener('keyup', updateUI);
+    setTodayDate();
+    setType('debit');
+    updateUI();
+    // ... existing variables ...
+
+    function addEntry() {
+        const date = document.getElementById('dateInput');
+        const desc = document.getElementById('desc');
+        const amount = document.getElementById('amount');
+        
+        // Validation Check
+        if (!desc.value.trim() || !amount.value || !date.value) {
+            // Visual feedback: briefly turn borders red
+
+
+            if(!desc.value.trim()) desc.style.borderColor = "#e74c3c";
+            if(!amount.value) amount.style.borderColor = "#e74c3c";
+            
+            alert("Please fill in both the Description and the Amount before saving.");
+            
+            // Reset colors after 2 seconds
+            setTimeout(() => {
+                desc.style.borderColor = "#ddd";
+                amount.style.borderColor = "#ddd";
+            }, 2000);
+            return;
+        }
+
+        if (editIndex !== null) {
+            transactions[editIndex] = { 
+                date: date.value, 
+                desc: desc.value, 
+                amount: amount.value, 
+                type: selectedType 
+            };
+            editIndex = null;
+            document.getElementById('submitBtn').innerText = "Save Transaction";
+            document.getElementById('submitBtn').classList.remove('editing-mode');
+            document.getElementById('formTitle').innerText = "Record Entry";
+        } else {
+            transactions.push({ 
+                date: date.value, 
+                desc: desc.value, 
+                amount: amount.value, 
+                type: selectedType 
+            });
+        }
+        
+        updateUI();
+        // Clear inputs after successful save
+        desc.value = '';
+        amount.value = '';
+        desc.style.borderColor = "#ddd";
+        amount.style.borderColor = "#ddd";
+    }
+
+    // ... rest of your script ...
+</script>
+</body>
+</html>
